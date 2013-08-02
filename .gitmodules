@@ -1,0 +1,6 @@
+[submodule "libstrophe"]
+	path = libstrophe
+	url = git@github.com:kassak/libstrophe.git
+[submodule "libtinysocket"]
+	path = libtinysocket
+	url = git@github.com:kassak/libtinysocket.git
