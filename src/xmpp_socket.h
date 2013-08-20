@@ -12,11 +12,35 @@
 #define XMPPSOCKET_ITEM(X)  XMPPSOCKET_CONCAT(XMPPSOCKET_PREFIX, X)
 #define XMPPSOCKET_FUNCTION(RET, FOO) RET XMPPSOCKET_ITEM(FOO)
 
-struct XMPPSOCKET_ITEM(socket_t)
+#include <libtinysocket/tinysocket.h>
+
+enum {
+   XS_ERROR,
+   XS_OK,
+}
+
+struct XMPPSOCKET_ITEM(settings_t)
 {
-   tinsock_socket_t sock;
-   xmpp_conn_t * xmppconn;
+   const char * jid;
+   const char * pass;
+   const char * altdomain;
+   const char * pair_jid;
+   unsigned short altport;
+
+   tinsock_sockaddr_storage_t addr;
 };
+
+
+struct XMPPSOCKET_ITEM(socket_t);
+
+XMPPSOCKET_FUNCTION(int, init)();
+XMPPSOCKET_FUNCTION(int, deinit)();
+XMPPSOCKET_FUNCTION(XMPPSOCKET_ITEM(socket_t) *, create)(xmpp_mem_t * allocator);
+XMPPSOCKET_FUNCTION(void, dispose)(XMPPSOCKET_ITEM(socket_t) * xsock);
+XMPPSOCKET_FUNCTION(XMPPSOCKET_ITEM(settings_t) *, settings)(XMPPSOCKET_ITEM(socket_t) * xsock);
+XMPPSOCKET_FUNCTION(int, connect_xmpp)(XMPPSOCKET_ITEM(socket_t) * xsock);
+XMPPSOCKET_FUNCTION(int, connect_sock)(XMPPSOCKET_ITEM(socket_t) * xsock);
+XMPPSOCKET_FUNCTION(int, pair_socket)(XMPPSOCKET_ITEM(socket_t) * xsock, tinsock_socket_t sock)
 
 #undef XMPPSOCKET_PREFIX
 #undef XMPPSOCKET_CONCAT2
