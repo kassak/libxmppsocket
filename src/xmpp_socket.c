@@ -115,3 +115,9 @@ XMPPSOCKET_FUNCTION(int, pair_socket)(XMPPSOCKET_ITEM(socket_t) * xsock, tinsock
    xsock->sock = sock;
    return XS_OK;
 }
+
+XMPPSOCKET_FUNCTION(int, run_once)(XMPPSOCKET_ITEM(socket_t) * xsock, unsigned long timeout)
+{
+   xmpp_run_once_foreign(xsock->xmppctx, timeout, &xsock->sock, 1, &xsock->sock, 1);
+
+}
