@@ -27,6 +27,9 @@ struct XMPPSOCKET_ITEM(settings_t)
    const char * pair_jid;
    unsigned short altport;
 
+   unsigned int rd_queue_size;
+   unsigned int wr_queue_size;
+
    tinsock_sockaddr_storage_t addr;
 };
 

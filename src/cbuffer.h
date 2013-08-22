@@ -10,20 +10,35 @@ struct cbuffer_t
 
 void* cbuffer_seq_avail_write(const cbuffer_t * cbuf, const void * buf, int * sz)
 {
-   if(size + offset <= capacity)
-      *sz = capacity - size - offset;
+   if(cbuf->size + cbuf->offset <= cbuf->capacity)
+      *sz = cbuf->capacity - cbuf->size - cbuf->offset;
    else
-      *sz = capacity - size;
+      *sz = cbuf->capacity - cbuf->size;
    return buf + cbuf->offset;
 }
 
 void* cbuffer_seq_avail_read(const cbuffer_t * cbuf, const void * buf, int * sz)
 {
-   if(size + offset <= capacity)
-      *sz = size;
+   if(cbuf->size + cbuf->offset <= cbuf->capacity)
+      *sz = cbuf->size;
    else
-      *sz = capacity - offset;
+      *sz = cbuf->capacity - cbuf->offset;
    return buf + cbuf->offset;
+}
+
+void cbuffer_read(const cbuffer_t * cbuf, int num)
+{
+   assert(cbuf->size >= num);
+   cbuf->offset += num;
+   if(cbuf->offset >= cbuf->capacity)
+      cbuf->offset -= cbuf->capacity;
+   cbuf->size -= num;
+}
+
+void cbuffer_write(const cbuffer_t * cbuf, int num)
+{
+   assert(cbuf->size + num <= cbuf->capacity);
+   cbuf->size += num;
 }
 
 #endif //CBUFFER_H
