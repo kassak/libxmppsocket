@@ -4,12 +4,15 @@
 #define KB *1024
 #define MB *1024 KB
 
+#define PRECONDITION(X, S) if(!(X)) {_fill_error(S, XS_ELOGIC, "precondition failed: " + #X);assert(false);return XS_ERROR;}
+
 struct XMPPSOCKET_ITEM(socket_t)
 {
    tinsock_socket_t sock;
    xmpp_conn_t * xmppconn;
    xmpp_ctx_t * xmppctx;
-   settings_t settings;
+   XMPPSOCKET_ITEM(settings_t) settings;
+   XMPPSOCKET_ITEM(errors_t) last_error;
 
    cbuffer_t swr_queue;
    cbuffer_t srd_queue;
@@ -17,6 +20,28 @@ struct XMPPSOCKET_ITEM(socket_t)
    char* srd_buf;
 };
 
+static void _clear_sock_error(XMPPSOCKET_ITEM(socket_t) * xsock)
+{
+   memset(&xsock->last_error, 0, sizeof(XMPPSOCKET_ITEM(errors_t)));
+}
+
+static void _fill_error(XMPPSOCKET_ITEM(socket_t) * xsock, int xs_error, const char * desc)
+{
+   _clear_sock_error(xsock);
+   xsock->last_error.xs_error = xs_error;
+   xsock->last_error.xs_desc = desc;
+}
+
+static void _fill_sock_error(XMPPSOCKET_ITEM(socket_t) * xsock, int xs_error, const char * desc)
+{
+   _fill_error(xsock, xs_error, desc);
+   xsock->last_error.ts_error = tinsock_last_error();
+}
+
+XMPPSOCKET_FUNCTION(XMPPSOCKET_ITEM(errors_t) *, last_error)(XMPPSOCKET_ITEM(socket_t) * xsock)
+{
+   return &xsock->last_error;
+}
 
 XMPPSOCKET_FUNCTION(int, init)()
 {
@@ -147,7 +172,8 @@ static int _update_queues(XMPPSOCKET_ITEM(socket_t) * xsock)
 
 XMPPSOCKET_FUNCTION(int, connect_sock)(XMPPSOCKET_ITEM(socket_t) * xsock)
 {
-   assert(xsock->sock == TS_SOCKET_ERROR);
+   PRECONDITION(xsock->sock == TS_SOCKET_ERROR, xsock);
+
    if(_update_queues(xsock) == -1)
       goto abort;
    xsock->sock = tinsock_socket(settings.addr->__sa_family, TS_SOCK_STREAM, TS_IPPROTO_UNSPECIFIED);
@@ -166,17 +192,59 @@ abort:
 
 XMPPSOCKET_FUNCTION(int, pair_socket)(XMPPSOCKET_ITEM(socket_t) * xsock, tinsock_socket_t sock)
 {
-   assert(xsock->sock == TS_SOCKET_ERROR);
+   PRECONDITION(xsock->sock == TS_SOCKET_ERROR, xsock);
+
    if(_update_queues(xsock) == -1)
-      return ;
-   if(xsock->sock == sock)
-      return XS_OK;
+      return XS_ERROR;
    xsock->sock = sock;
    return XS_OK;
 }
 
 XMPPSOCKET_FUNCTION(int, run_once)(XMPPSOCKET_ITEM(socket_t) * xsock, unsigned long timeout)
 {
-   xmpp_run_once_foreign(xsock->xmppctx, timeout, &xsock->sock, 1, &xsock->sock, 1);
+   PRECONDITION(xsock->sock != TS_SOCKET_ERROR, xsock);
+   PRECONDITION(xsock->xmppcon != NULL, xsock);
 
+   xmpp_run_once_foreign(xsock->xmppctx, timeout, &xsock->sock, 1, &xsock->sock, 1);
+   int sz;
+   void * buf;
+   //read from socket
+   buf = cbuffer_seq_avail_write(&xsock->srd_queue, xsock->srd_buf, &sz);
+   if(sz)
+   {
+      int res = tinsock_read(xsock->sock, buf, sz);
+      if(res == -1 && !tinsock_is_recoverable())
+      {
+         _fill_sock_error(xsock, XS_ETRANSMISSION, "error reading from socket");
+         return XS_ERROR;
+      }
+      else if(res == 0)
+      {
+         //socket closed?
+      }
+      else if(res != -1)
+      {
+         cbuffer_write(&xsock->srd_queue, res);
+      }
+   }
+   //write to socket
+   buf = cbuffer_seq_avail_read(&xsock->srd_queue, xsock->srd_buf, &sz);
+   if(sz)
+   {
+      int res = tinsock_write(xsock->sock, buf, sz);
+      if(res == -1 && !tinsock_is_recoverable())
+      {
+         _fill_sock_error(xsock, XS_ETRANSMISSION, "error writing to socket");
+         return XS_ERROR;
+      }
+      else if(res == 0)
+      {
+         //socket closed?
+      }
+      else if(res != -1)
+      {
+         cbuffer_read(&xsock->srd_queue, res);
+      }
+   }
+   return XS_OK;
 }

@@ -19,6 +19,13 @@ enum {
    XS_OK,
 }
 
+enum {
+   XS_EOK,
+   XS_ETRANSMISSION,
+   XS_EALLOCATION,
+   XS_ELOGIC,
+}
+
 struct XMPPSOCKET_ITEM(settings_t)
 {
    const char * jid;
@@ -33,6 +40,13 @@ struct XMPPSOCKET_ITEM(settings_t)
    tinsock_sockaddr_storage_t addr;
 };
 
+struct XMPPSOCKET_ITEM(errors_t)
+{
+   int xs_errno;
+   const char * xs_desc;
+   int ts_errno;
+};
+
 
 struct XMPPSOCKET_ITEM(socket_t);
 
@@ -40,11 +54,13 @@ XMPPSOCKET_FUNCTION(int, init)();
 XMPPSOCKET_FUNCTION(int, deinit)();
 XMPPSOCKET_FUNCTION(XMPPSOCKET_ITEM(socket_t) *, create)(xmpp_mem_t * allocator);
 XMPPSOCKET_FUNCTION(void, dispose)(XMPPSOCKET_ITEM(socket_t) * xsock);
-XMPPSOCKET_FUNCTION(XMPPSOCKET_ITEM(settings_t) *, settings)(XMPPSOCKET_ITEM(socket_t) * xsock);
 XMPPSOCKET_FUNCTION(int, connect_xmpp)(XMPPSOCKET_ITEM(socket_t) * xsock);
 XMPPSOCKET_FUNCTION(int, connect_sock)(XMPPSOCKET_ITEM(socket_t) * xsock);
 XMPPSOCKET_FUNCTION(int, pair_socket)(XMPPSOCKET_ITEM(socket_t) * xsock, tinsock_socket_t sock)
 XMPPSOCKET_FUNCTION(int, run_once)(XMPPSOCKET_ITEM(socket_t) * xsock)
+
+XMPPSOCKET_FUNCTION(XMPPSOCKET_ITEM(settings_t) *, settings)(XMPPSOCKET_ITEM(socket_t) * xsock);
+XMPPSOCKET_FUNCTION(XMPPSOCKET_ITEM(errors_t) *, last_error)(XMPPSOCKET_ITEM(socket_t) * xsock);
 
 #undef XMPPSOCKET_PREFIX
 #undef XMPPSOCKET_CONCAT2
