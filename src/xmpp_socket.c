@@ -99,13 +99,89 @@ XMPPSOCKET_FUNCTION(void, dispose)(XMPPSOCKET_ITEM(socket_t) * xsock)
 {
    if(xsock->sock != TS_SOCKET_ERROR)
       tinsocket_close(xsock->sock);
-   xmpp_conn_release(conn);
-   xmpp_ctx_free(ctx);
+   if(xsock->xmppconn)
+      xmpp_conn_release(xsock->xmppconn);
+   if(xsock->xmppctx)
+      xmpp_ctx_free(xsock->cmppctx);
 }
 
 XMPPSOCKET_FUNCTION(XMPPSOCKET_ITEM(settings_t) *, settings)(XMPPSOCKET_ITEM(socket_t) * xsock)
 {
    return &xsock->settings;
+}
+
+static int _msg_handler(xmpp_conn_t * const conn, xmpp_stanza_t * const stanza,
+                        void * const userdata)
+{
+   XMPPSOCKET_ITEM(socket_t) * xsock = (XMPPSOCKET_ITEM(socket_t) *)userdata;
+   char *intext;
+
+   if(!xmpp_stanza_get_child_by_name(stanza, "body"))
+      return 1;
+   if(!strcmp(xmpp_stanza_get_attribute(stanza, "type"), "error"))
+      return 1;
+
+   intext = xmpp_stanza_get_text(xmpp_stanza_get_child_by_name(stanza, "body"));
+
+   int size = strlen(intext);
+   if(size == 0)
+      return 1;
+   void * state = xsock->settings.wr_filter.init_state(intext, size);
+   for(;;)
+   {
+      int sz, consumed, written;
+      void * buf = cbuffer_seq_avail_write(&xsock->swr_queue, xsock->swr_buf, sz);
+      if(sz == 0) // pitty, not enough space in queue
+      {
+         _fill_error(xsock, XS_EFILTER, "write queue overflow");
+         goto release;
+      }
+      if(xsock->settings.wr_filter.filter(intext, size, buf, sz, &consumed, &written, state))
+      {
+         _fill_filter_error(xsock, XS_EFILTER, "filter failed", state);
+         goto release;
+      }
+      if(written > sz) // oups, filter gone crazy and wrote outside queu
+      {
+         _fill_error(xsock, XS_EFILTER, "filter wrote too much");
+         goto release;
+      }
+
+      //update buffers
+      cbuffer_write(&xsock->swr_queue, written);
+      intext += consumed;
+      size -= consumed;
+
+      if(size < 0) // oups, filter gone crazy and ate outside string
+      {
+         _fill_error(xsock, XS_EFILTER, "filter consumed too much");
+         goto release;
+      }
+      //okay, everything is now in queue
+      if(size == 0)
+         break;
+   }
+release:
+   xsock->settings.wr_filter.deinit_state(state);
+   return 1;
+}
+
+static void _conn_handler(xmpp_conn_t * const conn, const xmpp_conn_event_t event,
+     const int error, xmpp_stream_error_t * const stream_error, void * const userdata)
+{
+   XMPPSOCKET_ITEM(socket_t) * xsock = (XMPPSOCKET_ITEM(socket_t) *)userdata;
+   if (status == XMPP_CONN_CONNECT)
+   {
+      xmpp_stanza_t* pres;
+      //      xmpp_handler_add(conn,version_handler, "jabber:iq:version", "iq", NULL, xsock);
+      xmpp_handler_add(conn, _msg_handler, NULL, "message", NULL, xsock);
+
+      /* Send initial <presence/> so that we appear online to contacts */
+      pres = xmpp_stanza_new(xsock->xmppctx);
+      xmpp_stanza_set_name(pres, "presence");
+      xmpp_send(conn, pres);
+      xmpp_stanza_release(pres);
+   }
 }
 
 XMPPSOCKET_FUNCTION(int, connect_xmpp)(XMPPSOCKET_ITEM(socket_t) * xsock)
@@ -114,8 +190,11 @@ XMPPSOCKET_FUNCTION(int, connect_xmpp)(XMPPSOCKET_ITEM(socket_t) * xsock)
    xmpp_conn_set_pass(xsock->xmppconn, settings->pass);
 
    /* initiate connection */
-   if(xmpp_connect_client(xsock->xmppconn, settings->altdomain, settings->altport, conn_handler, xsock))
+   if(xmpp_connect_client(xsock->xmppconn, settings->altdomain, settings->altport, _conn_handler, xsock))
+   {
+      _fill_sock_error(xsock, XS_TRANSMISSION, "xmpp connection failed");
       goto abort;
+   }
 
    return XS_OK;
 abort:
@@ -134,10 +213,16 @@ static int _init_queues(XMPPSOCKET_ITEM(socket_t) * xsock)
 {
    xsock->srd_buf = xmpp_alloc(xsock->xmppctx, xsock->settings.rd_queue_size);
    if(!xsock->srd_buf)
+   {
+      _fill_error(xsock, XS_EALLOCATION, "failed to allocate read buffer");
       goto abort;
+   }
    xsock->swr_buf = xmpp_alloc(xsock->xmppctx, xsock->settings.wr_queue_size);
    if(!xsock->swr_buf)
+   {
+      _fill_error(xsock, XS_EALLOCATION, "failed to allocate write buffer");
       goto error1;
+   }
    xsock->srd_queue->capacity = xsock->settings.rd_queue_size;
    xsock->swr_queue->capacity = xsock->settings.wr_queue_size;
    _clear_queues(xsock);
@@ -178,11 +263,17 @@ XMPPSOCKET_FUNCTION(int, connect_sock)(XMPPSOCKET_ITEM(socket_t) * xsock)
       goto abort;
    xsock->sock = tinsock_socket(settings.addr->__sa_family, TS_SOCK_STREAM, TS_IPPROTO_UNSPECIFIED);
    if(xsock->sock == TS_SOCKET_ERROR)
+   {
+      _fill_sock_error(xsock, XS_ETRANSMISSION, "failed to create socket");
       goto abort;
+   }
 
    if(TS_NO_ERROR != tinsock_connect(xsock->sock, (const tinsock_sockaddr*)(settings->addr),
                                      sizeof(tinsock_sockaddr_storage_t)))
+   {
+      _fill_sock_error(xsock, XS_ETRANSMISSION, "failed to connect");
       goto error1;
+   }
    return XS_OK;
 error1:
    tinsock_close(xsock->sock);

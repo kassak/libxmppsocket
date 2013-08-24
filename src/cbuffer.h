@@ -8,7 +8,7 @@ struct cbuffer_t
    int offset;
 };
 
-void* cbuffer_seq_avail_write(const cbuffer_t * cbuf, const void * buf, int * sz)
+inline void* cbuffer_seq_avail_write(const cbuffer_t * cbuf, const void * buf, int * sz)
 {
    if(cbuf->size + cbuf->offset <= cbuf->capacity)
       *sz = cbuf->capacity - cbuf->size - cbuf->offset;
@@ -17,7 +17,7 @@ void* cbuffer_seq_avail_write(const cbuffer_t * cbuf, const void * buf, int * sz
    return buf + cbuf->offset;
 }
 
-void* cbuffer_seq_avail_read(const cbuffer_t * cbuf, void * buf, int * sz)
+inline void* cbuffer_seq_avail_read(const cbuffer_t * cbuf, void * buf, int * sz)
 {
    if(cbuf->size + cbuf->offset <= cbuf->capacity)
       *sz = cbuf->size;
@@ -26,7 +26,7 @@ void* cbuffer_seq_avail_read(const cbuffer_t * cbuf, void * buf, int * sz)
    return buf + cbuf->offset;
 }
 
-void cbuffer_read(cbuffer_t * cbuf, int num)
+inline void cbuffer_read(cbuffer_t * cbuf, int num)
 {
    assert(cbuf->size >= num);
    cbuf->offset += num;
@@ -35,7 +35,7 @@ void cbuffer_read(cbuffer_t * cbuf, int num)
    cbuf->size -= num;
 }
 
-void cbuffer_write(cbuffer_t * cbuf, int num)
+inline void cbuffer_write(cbuffer_t * cbuf, int num)
 {
    assert(cbuf->size + num <= cbuf->capacity);
    cbuf->size += num;
