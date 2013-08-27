@@ -1,12 +1,16 @@
+#define XMPPSOCKET_DO_NOT_UNDEFINE
 #include "xmpp_socket.h"
 #include "cbuffer.h"
+#include <libtinysocket/tinysocket.h>
+#include <string.h>
+#include <assert.h>
 
 #define KB *1024
 #define MB *1024 KB
 
-#define PRECONDITION(X, S) if(!(X)) {_fill_error(S, XS_ELOGIC, "precondition failed: " + #X);assert(false);return XS_ERROR;}
+#define PRECONDITION(X, S) if(!(X)) {_fill_error(S, XS_ELOGIC, "precondition failed: " #X);assert(0);return XS_ERROR;}
 
-struct XMPPSOCKET_ITEM(socket_t)
+struct XMPPSOCKET_ITEM(socket_tag)
 {
    tinsock_socket_t sock;
    xmpp_conn_t * xmppconn;
@@ -28,14 +32,22 @@ static void _clear_sock_error(XMPPSOCKET_ITEM(socket_t) * xsock)
 static void _fill_error(XMPPSOCKET_ITEM(socket_t) * xsock, int xs_error, const char * desc)
 {
    _clear_sock_error(xsock);
-   xsock->last_error.xs_error = xs_error;
+   xsock->last_error.xs_errno = xs_error;
    xsock->last_error.xs_desc = desc;
+}
+
+static void _fill_filter_error(XMPPSOCKET_ITEM(socket_t) * xsock, int xs_error, const char * desc, XMPPSOCKET_ITEM(filter_t) * flt, void * state)
+{
+   _clear_sock_error(xsock);
+   xsock->last_error.xs_errno = xs_error;
+   xsock->last_error.xs_desc = desc;
+   //TODO: filter error
 }
 
 static void _fill_sock_error(XMPPSOCKET_ITEM(socket_t) * xsock, int xs_error, const char * desc)
 {
    _fill_error(xsock, xs_error, desc);
-   xsock->last_error.ts_error = tinsock_last_error();
+   xsock->last_error.ts_errno = tinsock_last_error();
 }
 
 XMPPSOCKET_FUNCTION(XMPPSOCKET_ITEM(errors_t) *, last_error)(XMPPSOCKET_ITEM(socket_t) * xsock)
@@ -58,24 +70,32 @@ static _init_settings(XMPPSOCKET_ITEM(settings_t) * settings)
 {
    memset(settings, 0, sizeof(XMPPSOCKET_ITEM(settings_t)));
    settings->rd_queue_size = settings->wr_queue_size = 1 MB;
+   settings->run_timeout = 10;
+   //TODO: default filter
+   //settings->rd_filter = ...;
+   //settings->wr_filter = ...;
 }
 
 static _init_socket(XMPPSOCKET_ITEM(socket_t) * xsock)
 {
-   memset(settings, 0, sizeof(XMPPSOCKET_ITEM(socket_t)));
+   memset(xsock, 0, sizeof(XMPPSOCKET_ITEM(socket_t)));
    xsock->sock = TS_SOCKET_ERROR;
    _init_settings(&xsock->settings);
 }
 
-XMPPSOCKET_FUNCTION(XMPPSOCKET_ITEM(socket_t) *, create)(xmpp_mem_t * allocator)
+XMPPSOCKET_FUNCTION(XMPPSOCKET_ITEM(socket_t) *, create)(xmpp_mem_t * allocator, int log_level)
 {
-   xmpp_ctx_t * ctx = xmpp_ctx_new(allocator, NULL); //   log = xmpp_get_default_logger(XMPP_LEVEL_DEBUG);
+   xmpp_log_t * log = NULL;
+   if(log_level != -1)
+      log = xmpp_get_default_logger(log_level);
+   xmpp_ctx_t * ctx = xmpp_ctx_new(allocator, log);
 
    if(!ctx)
       goto abort;
 
    XMPPSOCKET_ITEM(socket_t) * xsock = xmpp_alloc(ctx, sizeof(XMPPSOCKET_ITEM(socket_t)));
    _init_socket(xsock);
+   xsock->settings.xmpp_log_level = log_level;
    if(!xsock)
       goto error1;
 
@@ -98,11 +118,11 @@ abort:
 XMPPSOCKET_FUNCTION(void, dispose)(XMPPSOCKET_ITEM(socket_t) * xsock)
 {
    if(xsock->sock != TS_SOCKET_ERROR)
-      tinsocket_close(xsock->sock);
+      tinsock_close(xsock->sock);
    if(xsock->xmppconn)
       xmpp_conn_release(xsock->xmppconn);
    if(xsock->xmppctx)
-      xmpp_ctx_free(xsock->cmppctx);
+      xmpp_ctx_free(xsock->xmppctx);
 }
 
 XMPPSOCKET_FUNCTION(XMPPSOCKET_ITEM(settings_t) *, settings)(XMPPSOCKET_ITEM(socket_t) * xsock)
@@ -130,7 +150,7 @@ static int _msg_handler(xmpp_conn_t * const conn, xmpp_stanza_t * const stanza,
    for(;;)
    {
       int sz, consumed, written;
-      void * buf = cbuffer_seq_avail_write(&xsock->swr_queue, xsock->swr_buf, sz);
+      void * buf = cbuffer_seq_avail_write(&xsock->swr_queue, xsock->swr_buf, &sz);
       if(sz == 0) // pitty, not enough space in queue
       {
          _fill_error(xsock, XS_EFILTER, "write queue overflow");
@@ -138,7 +158,7 @@ static int _msg_handler(xmpp_conn_t * const conn, xmpp_stanza_t * const stanza,
       }
       if(xsock->settings.wr_filter.filter(intext, size, buf, sz, &consumed, &written, state))
       {
-         _fill_filter_error(xsock, XS_EFILTER, "filter failed", state);
+         _fill_filter_error(xsock, XS_EFILTER, "filter failed", &xsock->settings.wr_filter, state);
          goto release;
       }
       if(written > sz) // oups, filter gone crazy and wrote outside queu
@@ -170,8 +190,9 @@ static void _conn_handler(xmpp_conn_t * const conn, const xmpp_conn_event_t even
      const int error, xmpp_stream_error_t * const stream_error, void * const userdata)
 {
    XMPPSOCKET_ITEM(socket_t) * xsock = (XMPPSOCKET_ITEM(socket_t) *)userdata;
-   if (status == XMPP_CONN_CONNECT)
+   if (event == XMPP_CONN_CONNECT)
    {
+      printf("connected\n");
       xmpp_stanza_t* pres;
       //      xmpp_handler_add(conn,version_handler, "jabber:iq:version", "iq", NULL, xsock);
       xmpp_handler_add(conn, _msg_handler, NULL, "message", NULL, xsock);
@@ -182,17 +203,22 @@ static void _conn_handler(xmpp_conn_t * const conn, const xmpp_conn_event_t even
       xmpp_send(conn, pres);
       xmpp_stanza_release(pres);
    }
+   else
+   {
+      printf("disconnected %i\n", error);
+   }
 }
 
 XMPPSOCKET_FUNCTION(int, connect_xmpp)(XMPPSOCKET_ITEM(socket_t) * xsock)
 {
-   xmpp_conn_set_jid(xsock->xmppconn, settings->jid);
-   xmpp_conn_set_pass(xsock->xmppconn, settings->pass);
+   xmpp_conn_set_jid(xsock->xmppconn, xsock->settings.jid);
+   xmpp_conn_set_pass(xsock->xmppconn, xsock->settings.pass);
 
    /* initiate connection */
-   if(xmpp_connect_client(xsock->xmppconn, settings->altdomain, settings->altport, _conn_handler, xsock))
+   if(xmpp_connect_client(xsock->xmppconn, xsock->settings.altdomain,
+         xsock->settings.altport, _conn_handler, xsock))
    {
-      _fill_sock_error(xsock, XS_TRANSMISSION, "xmpp connection failed");
+      _fill_sock_error(xsock, XS_ETRANSMISSION, "xmpp connection failed");
       goto abort;
    }
 
@@ -203,10 +229,10 @@ abort:
 
 static void _clear_queues(XMPPSOCKET_ITEM(socket_t) * xsock)
 {
-   xsock->srd_queue->size = 0;
-   xsock->srd_queue->offset = 0;
-   xsock->swr_queue->size = 0;
-   xsock->swr_queue->offset = 0;
+   xsock->srd_queue.size = 0;
+   xsock->srd_queue.offset = 0;
+   xsock->swr_queue.size = 0;
+   xsock->swr_queue.offset = 0;
 }
 
 static int _init_queues(XMPPSOCKET_ITEM(socket_t) * xsock)
@@ -223,8 +249,8 @@ static int _init_queues(XMPPSOCKET_ITEM(socket_t) * xsock)
       _fill_error(xsock, XS_EALLOCATION, "failed to allocate write buffer");
       goto error1;
    }
-   xsock->srd_queue->capacity = xsock->settings.rd_queue_size;
-   xsock->swr_queue->capacity = xsock->settings.wr_queue_size;
+   xsock->srd_queue.capacity = xsock->settings.rd_queue_size;
+   xsock->swr_queue.capacity = xsock->settings.wr_queue_size;
    _clear_queues(xsock);
 
    return 0;
@@ -236,8 +262,8 @@ abort:
 
 static void _deinit_queues(XMPPSOCKET_ITEM(socket_t) * xsock)
 {
-   xsock->srd_queue->capacity = 0;
-   xsock->swr_queue->capacity = 0;
+   xsock->srd_queue.capacity = 0;
+   xsock->swr_queue.capacity = 0;
    _clear_queues(xsock);
 
    if(xsock->srd_buf)
@@ -248,8 +274,8 @@ static void _deinit_queues(XMPPSOCKET_ITEM(socket_t) * xsock)
 
 static int _update_queues(XMPPSOCKET_ITEM(socket_t) * xsock)
 {
-   if(xsock->srd_queue->capacity == xsock->settings.rd_queue_size
-      && xsock->swr_queue->capacity == xsock->settings.wr_queue_size)
+   if(xsock->srd_queue.capacity == xsock->settings.rd_queue_size
+      && xsock->swr_queue.capacity == xsock->settings.wr_queue_size)
       return;
    _deinit_queues(xsock);
    return _init_queues(xsock);
@@ -261,14 +287,15 @@ XMPPSOCKET_FUNCTION(int, connect_sock)(XMPPSOCKET_ITEM(socket_t) * xsock)
 
    if(_update_queues(xsock) == -1)
       goto abort;
-   xsock->sock = tinsock_socket(settings.addr->__sa_family, TS_SOCK_STREAM, TS_IPPROTO_UNSPECIFIED);
+   xsock->sock = tinsock_socket(((const tinsock_sockaddr_t*)&xsock->settings.addr)->sa_family,
+          TS_SOCK_STREAM, TS_IPPROTO_UNSPECIFIED);
    if(xsock->sock == TS_SOCKET_ERROR)
    {
       _fill_sock_error(xsock, XS_ETRANSMISSION, "failed to create socket");
       goto abort;
    }
 
-   if(TS_NO_ERROR != tinsock_connect(xsock->sock, (const tinsock_sockaddr*)(settings->addr),
+   if(TS_NO_ERROR != tinsock_connect(xsock->sock, (const tinsock_sockaddr_t*)&xsock->settings.addr,
                                      sizeof(tinsock_sockaddr_storage_t)))
    {
       _fill_sock_error(xsock, XS_ETRANSMISSION, "failed to connect");
@@ -291,50 +318,56 @@ XMPPSOCKET_FUNCTION(int, pair_socket)(XMPPSOCKET_ITEM(socket_t) * xsock, tinsock
    return XS_OK;
 }
 
-XMPPSOCKET_FUNCTION(int, run_once)(XMPPSOCKET_ITEM(socket_t) * xsock, unsigned long timeout)
+XMPPSOCKET_FUNCTION(int, run_once)(XMPPSOCKET_ITEM(socket_t) * xsock)
 {
    PRECONDITION(xsock->sock != TS_SOCKET_ERROR, xsock);
-   PRECONDITION(xsock->xmppcon != NULL, xsock);
+   PRECONDITION(xsock->xmppconn != NULL, xsock);
 
-   xmpp_run_once_foreign(xsock->xmppctx, timeout, &xsock->sock, 1, &xsock->sock, 1);
-   int sz;
-   void * buf;
+   xmpp_run_once_foreign(xsock->xmppctx, xsock->settings.run_timeout, &xsock->sock, 1, &xsock->sock, 1);
    //read from socket
-   buf = cbuffer_seq_avail_write(&xsock->srd_queue, xsock->srd_buf, &sz);
-   if(sz)
    {
-      int res = tinsock_read(xsock->sock, buf, sz);
-      if(res == -1 && !tinsock_is_recoverable())
+      int sz;
+      void * buf;
+      buf = cbuffer_seq_avail_write(&xsock->srd_queue, xsock->srd_buf, &sz);
+      if(sz)
       {
-         _fill_sock_error(xsock, XS_ETRANSMISSION, "error reading from socket");
-         return XS_ERROR;
-      }
-      else if(res == 0)
-      {
-         //socket closed?
-      }
-      else if(res != -1)
-      {
-         cbuffer_write(&xsock->srd_queue, res);
+         int res = tinsock_read(xsock->sock, buf, sz);
+         if(res == -1 && !tinsock_is_recoverable())
+         {
+            _fill_sock_error(xsock, XS_ETRANSMISSION, "error reading from socket");
+            return XS_ERROR;
+         }
+         else if(res == 0)
+         {
+            //TODO: socket closed?
+         }
+         else if(res != -1)
+         {
+            cbuffer_write(&xsock->srd_queue, res);
+         }
       }
    }
    //write to socket
-   buf = cbuffer_seq_avail_read(&xsock->srd_queue, xsock->srd_buf, &sz);
-   if(sz)
    {
-      int res = tinsock_write(xsock->sock, buf, sz);
-      if(res == -1 && !tinsock_is_recoverable())
+      int sz;
+      const void * buf;
+      buf = cbuffer_seq_avail_read(&xsock->srd_queue, xsock->srd_buf, &sz);
+      if(sz)
       {
-         _fill_sock_error(xsock, XS_ETRANSMISSION, "error writing to socket");
-         return XS_ERROR;
-      }
-      else if(res == 0)
-      {
-         //socket closed?
-      }
-      else if(res != -1)
-      {
-         cbuffer_read(&xsock->srd_queue, res);
+         int res = tinsock_write(xsock->sock, buf, sz);
+         if(res == -1 && !tinsock_is_recoverable())
+         {
+            _fill_sock_error(xsock, XS_ETRANSMISSION, "error writing to socket");
+            return XS_ERROR;
+         }
+         else if(res == 0)
+         {
+            //TODO: socket closed?
+         }
+         else if(res != -1)
+         {
+            cbuffer_read(&xsock->srd_queue, res);
+         }
       }
    }
    return XS_OK;

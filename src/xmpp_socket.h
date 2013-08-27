@@ -13,20 +13,40 @@
 #define XMPPSOCKET_FUNCTION(RET, FOO) RET XMPPSOCKET_ITEM(FOO)
 
 #include <libtinysocket/tinysocket.h>
+#include <libstrophe/strophe.h>
 
-enum {
+enum XMPPSOCKET_ITEM(result_t){
    XS_ERROR,
    XS_OK,
-}
+};
 
-enum {
+enum XMPPSOCKET_ITEM(xmpp_log_level_t){
+   XS_XL_NONE = -1,
+   XS_XL_DEBUG,
+   XS_XL_INFO,
+   XS_XL_WARN,
+   XS_XL_ERROR
+};
+
+enum XMPPSOCKET_ITEM(errno_t){
    XS_EOK,
    XS_ETRANSMISSION,
    XS_EALLOCATION,
    XS_ELOGIC,
-}
+   XS_EFILTER,
+};
 
-struct XMPPSOCKET_ITEM(settings_t)
+typedef struct XMPPSOCKET_ITEM(filter_tag)
+{
+   void* (*init_state) (const void * in_data, int in_data_sz);
+   void (*deinit_state) (void * state);
+   int (*filter)(const void * in_data, int in_data_sz,
+          void * out_data, int out_data_sz,
+          int * consumed, int * written, void * state);
+   void (*last_error_str)(char * buf, int size);
+} XMPPSOCKET_ITEM(filter_t);
+
+typedef struct XMPPSOCKET_ITEM(settings_tag)
 {
    const char * jid;
    const char * pass;
@@ -37,35 +57,43 @@ struct XMPPSOCKET_ITEM(settings_t)
    unsigned int rd_queue_size;
    unsigned int wr_queue_size;
 
-   tinsock_sockaddr_storage_t addr;
-};
+   XMPPSOCKET_ITEM(filter_t) rd_filter;
+   XMPPSOCKET_ITEM(filter_t) wr_filter;
 
-struct XMPPSOCKET_ITEM(errors_t)
+   unsigned long run_timeout;
+   int xmpp_log_level;
+
+   tinsock_sockaddr_storage_t addr;
+} XMPPSOCKET_ITEM(settings_t);
+
+typedef struct XMPPSOCKET_ITEM(errors_tag)
 {
    int xs_errno;
    const char * xs_desc;
    int ts_errno;
-};
+} XMPPSOCKET_ITEM(errors_t);
 
-
-struct XMPPSOCKET_ITEM(socket_t);
+struct XMPPSOCKET_ITEM(socket_tag);
+typedef struct XMPPSOCKET_ITEM(socket_tag) XMPPSOCKET_ITEM(socket_t);
 
 XMPPSOCKET_FUNCTION(int, init)();
 XMPPSOCKET_FUNCTION(int, deinit)();
-XMPPSOCKET_FUNCTION(XMPPSOCKET_ITEM(socket_t) *, create)(xmpp_mem_t * allocator);
+XMPPSOCKET_FUNCTION(XMPPSOCKET_ITEM(socket_t) *, create)(xmpp_mem_t * allocator, int log_level);
 XMPPSOCKET_FUNCTION(void, dispose)(XMPPSOCKET_ITEM(socket_t) * xsock);
 XMPPSOCKET_FUNCTION(int, connect_xmpp)(XMPPSOCKET_ITEM(socket_t) * xsock);
 XMPPSOCKET_FUNCTION(int, connect_sock)(XMPPSOCKET_ITEM(socket_t) * xsock);
-XMPPSOCKET_FUNCTION(int, pair_socket)(XMPPSOCKET_ITEM(socket_t) * xsock, tinsock_socket_t sock)
-XMPPSOCKET_FUNCTION(int, run_once)(XMPPSOCKET_ITEM(socket_t) * xsock)
+XMPPSOCKET_FUNCTION(int, pair_socket)(XMPPSOCKET_ITEM(socket_t) * xsock, tinsock_socket_t sock);
+XMPPSOCKET_FUNCTION(int, run_once)(XMPPSOCKET_ITEM(socket_t) * xsock);
 
 XMPPSOCKET_FUNCTION(XMPPSOCKET_ITEM(settings_t) *, settings)(XMPPSOCKET_ITEM(socket_t) * xsock);
 XMPPSOCKET_FUNCTION(XMPPSOCKET_ITEM(errors_t) *, last_error)(XMPPSOCKET_ITEM(socket_t) * xsock);
 
-#undef XMPPSOCKET_PREFIX
-#undef XMPPSOCKET_CONCAT2
-#undef XMPPSOCKET_CONCAT
-#undef XMPPSOCKET_ITEM
-#undef XMPPSOCKET_FUNCTION
+#ifndef XMPPSOCKET_DO_NOT_UNDEFINE
+   #undef XMPPSOCKET_PREFIX
+   #undef XMPPSOCKET_CONCAT2
+   #undef XMPPSOCKET_CONCAT
+   #undef XMPPSOCKET_ITEM
+   #undef XMPPSOCKET_FUNCTION
+#endif
 
 #endif // XMPP_SOCKET_H

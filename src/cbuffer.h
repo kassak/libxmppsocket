@@ -1,14 +1,16 @@
 #ifndef CBUFFER_H
 #define CBUFFER_H
 
-struct cbuffer_t
+#include <assert.h>
+
+typedef struct cbuffer_tag
 {
    int capacity;
    int size;
    int offset;
-};
+} cbuffer_t;
 
-inline void* cbuffer_seq_avail_write(const cbuffer_t * cbuf, const void * buf, int * sz)
+static inline void* cbuffer_seq_avail_write(const cbuffer_t * cbuf, void * buf, int * sz)
 {
    if(cbuf->size + cbuf->offset <= cbuf->capacity)
       *sz = cbuf->capacity - cbuf->size - cbuf->offset;
@@ -17,7 +19,7 @@ inline void* cbuffer_seq_avail_write(const cbuffer_t * cbuf, const void * buf, i
    return buf + cbuf->offset;
 }
 
-inline void* cbuffer_seq_avail_read(const cbuffer_t * cbuf, void * buf, int * sz)
+static inline const void* cbuffer_seq_avail_read(const cbuffer_t * cbuf, const void * buf, int * sz)
 {
    if(cbuf->size + cbuf->offset <= cbuf->capacity)
       *sz = cbuf->size;
@@ -26,7 +28,7 @@ inline void* cbuffer_seq_avail_read(const cbuffer_t * cbuf, void * buf, int * sz
    return buf + cbuf->offset;
 }
 
-inline void cbuffer_read(cbuffer_t * cbuf, int num)
+static inline void cbuffer_read(cbuffer_t * cbuf, int num)
 {
    assert(cbuf->size >= num);
    cbuf->offset += num;
@@ -35,7 +37,7 @@ inline void cbuffer_read(cbuffer_t * cbuf, int num)
    cbuf->size -= num;
 }
 
-inline void cbuffer_write(cbuffer_t * cbuf, int num)
+static inline void cbuffer_write(cbuffer_t * cbuf, int num)
 {
    assert(cbuf->size + num <= cbuf->capacity);
    cbuf->size += num;

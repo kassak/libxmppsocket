@@ -1,9 +1,21 @@
 #include <libstrophe/strophe.h>
-#include <libtinysocket/src/tinysocket.h>
+#include "xmpp_socket.h"
+#include <assert.h>
 
 int main(int argc, char ** argv)
 {
-   tinsock_socket_t sock = tinsock_socket(TS_AF_INET, TS_SOCK_STREAM, TS_IPPROTO_UNSPECIFIED);
+   xmppsock_init();
+   xmppsock_socket_t * xsock = xmppsock_create(NULL, XS_XL_DEBUG);
 
-   tinsock_close(sock);
+   xmppsock_settings_t * s = xmppsock_settings(xsock);
+   s->jid = "";
+   s->pass = "";
+
+   int res = xmppsock_connect_xmpp(xsock);
+   assert(res == XS_OK);
+
+   printf("done\n");
+
+   xmppsock_dispose(xsock);
+   xmppsock_deinit();
 }

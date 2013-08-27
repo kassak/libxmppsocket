@@ -8,6 +8,7 @@ include_directories(${CMAKE_SOURCE_DIR})
 
 set(SOURCES
   src/socket.c
+  src/xmpp_socket.c
 )
 
 add_executable(test ${SOURCES})
