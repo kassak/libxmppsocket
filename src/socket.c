@@ -8,8 +8,8 @@ int main(int argc, char ** argv)
    xmppsock_socket_t * xsock = xmppsock_create(NULL, XS_XL_DEBUG);
 
    xmppsock_settings_t * s = xmppsock_settings(xsock);
-   s->jid = "";
-   s->pass = "";
+   s->jid = argv[1];
+   s->pass = argv[2];
 
    int res = xmppsock_connect_xmpp(xsock);
    assert(res == XS_OK);

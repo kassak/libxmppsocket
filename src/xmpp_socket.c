@@ -71,9 +71,8 @@ static _init_settings(XMPPSOCKET_ITEM(settings_t) * settings)
    memset(settings, 0, sizeof(XMPPSOCKET_ITEM(settings_t)));
    settings->rd_queue_size = settings->wr_queue_size = 1 MB;
    settings->run_timeout = 10;
-   //TODO: default filter
-   //settings->rd_filter = ...;
-   //settings->wr_filter = ...;
+   settings->rd_filter = *XMPPSOCKET_ITEM(default_filter)();
+   settings->wr_filter = *XMPPSOCKET_ITEM(default_filter)();
 }
 
 static _init_socket(XMPPSOCKET_ITEM(socket_t) * xsock)
@@ -371,4 +370,42 @@ XMPPSOCKET_FUNCTION(int, run_once)(XMPPSOCKET_ITEM(socket_t) * xsock)
       }
    }
    return XS_OK;
+}
+
+static void* _init_dummy_state(const void * data, int sz)
+{
+}
+
+static void _deinit_dummy_state(void * state)
+{
+}
+
+static int _transfer_filter(const void * in_data, int in_data_sz,
+          void * out_data, int out_data_sz,
+          int * consumed, int * written, void * state)
+{
+   int tr = (out_data_sz < in_data_sz) ? out_data_sz : in_data_sz;
+   assert(tr > 0);
+   *consumed = *written = tr;
+   memcpy(out_data, in_data, tr);
+   return 0;
+}
+
+static void _last_dummy_error_str(char * buf, int size)
+{
+   strncpy(buf, "no, that can't be =)", size);
+   if(size > 0) //just to be sure
+       buf[size - 1] = '\0';
+}
+
+
+XMPPSOCKET_FUNCTION(const XMPPSOCKET_ITEM(filter_t)*, default_filter)()
+{
+   static XMPPSOCKET_ITEM(filter_t) def_filter = {
+      _init_dummy_state,
+      _deinit_dummy_state,
+      _transfer_filter,
+      _last_dummy_error_str
+   };
+   return &def_filter;
 }
