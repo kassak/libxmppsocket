@@ -280,6 +280,16 @@ static int _update_queues(XMPPSOCKET_ITEM(socket_t) * xsock)
    return _init_queues(xsock);
 }
 
+static int _addr_size_by_family(int family)
+{
+   if(family == TS_AF_INET)
+      return sizeof(tinsock_sockaddr_in_t);
+   else if(family == TS_AF_INET)
+      return sizeof(tinsock_sockaddr_in6_t);
+   assert(!"unsupported family");
+   return 0;
+}
+
 XMPPSOCKET_FUNCTION(int, connect_sock)(XMPPSOCKET_ITEM(socket_t) * xsock)
 {
    PRECONDITION(xsock->sock == TS_SOCKET_ERROR, xsock);
@@ -295,7 +305,7 @@ XMPPSOCKET_FUNCTION(int, connect_sock)(XMPPSOCKET_ITEM(socket_t) * xsock)
    }
 
    if(TS_NO_ERROR != tinsock_connect(xsock->sock, (const tinsock_sockaddr_t*)&xsock->settings.addr,
-                                     sizeof(tinsock_sockaddr_storage_t)))
+                                     _addr_size_by_family(xsock->settings.addr.ss_family)))
    {
       _fill_sock_error(xsock, XS_ETRANSMISSION, "failed to connect");
       goto error1;
@@ -408,4 +418,20 @@ XMPPSOCKET_FUNCTION(const XMPPSOCKET_ITEM(filter_t)*, default_filter)()
       _last_dummy_error_str
    };
    return &def_filter;
+}
+
+XMPPSOCKET_FUNCTION(void, format_error)(XMPPSOCKET_ITEM(errors_t) * e, char * buf, int sz)
+{
+   if(e->xs_errno == XS_EOK)
+   {
+      buf[0] = '\0';
+      return;
+   }
+   if(e->ts_errno == 0)
+   {
+      strncpy(buf, e->xs_desc, sz);
+      if(sz != 0)
+         buf[sz-1] = '\0';
+   }
+   snprintf(buf, sz, "%s: %s", e->xs_desc, strerror(e->ts_errno));
 }

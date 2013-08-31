@@ -88,6 +88,8 @@ XMPPSOCKET_FUNCTION(int, run_once)(XMPPSOCKET_ITEM(socket_t) * xsock);
 XMPPSOCKET_FUNCTION(XMPPSOCKET_ITEM(settings_t) *, settings)(XMPPSOCKET_ITEM(socket_t) * xsock);
 XMPPSOCKET_FUNCTION(XMPPSOCKET_ITEM(errors_t) *, last_error)(XMPPSOCKET_ITEM(socket_t) * xsock);
 
+XMPPSOCKET_FUNCTION(void, format_error)(XMPPSOCKET_ITEM(errors_t) * e, char * buf, int sz);
+
 XMPPSOCKET_FUNCTION(const XMPPSOCKET_ITEM(filter_t)*, default_filter)();
 
 #ifndef XMPPSOCKET_DO_NOT_UNDEFINE
