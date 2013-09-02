@@ -7,7 +7,7 @@
 int main(int argc, char ** argv)
 {
    xmppsock_init();
-   xmppsock_socket_t * xsock = xmppsock_create(NULL, XS_XL_DEBUG);
+   xmppsock_socket_t * xsock = xmppsock_create((occam_allocator_t*)NULL, xmpp_get_default_logger(OCCAM_LOG_LEVEL_DEBUG));
 
    xmppsock_settings_t * s = xmppsock_settings(xsock);
    s->jid = argv[1];

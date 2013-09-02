@@ -1,4 +1,5 @@
 #define XMPPSOCKET_DO_NOT_UNDEFINE
+#define OCCAM_STANDARD_ALLOCATOR
 #include "xmpp_socket.h"
 #include "cbuffer.h"
 #include <libtinysocket/tinysocket.h>
@@ -66,7 +67,7 @@ XMPPSOCKET_FUNCTION(int, deinit)()
    xmpp_shutdown();
 }
 
-static _init_settings(XMPPSOCKET_ITEM(settings_t) * settings)
+static void _init_settings(XMPPSOCKET_ITEM(settings_t) * settings)
 {
    memset(settings, 0, sizeof(XMPPSOCKET_ITEM(settings_t)));
    settings->rd_queue_size = settings->wr_queue_size = 1 MB;
@@ -75,26 +76,26 @@ static _init_settings(XMPPSOCKET_ITEM(settings_t) * settings)
    settings->wr_filter = *XMPPSOCKET_ITEM(default_filter)();
 }
 
-static _init_socket(XMPPSOCKET_ITEM(socket_t) * xsock)
+static void _init_socket(XMPPSOCKET_ITEM(socket_t) * xsock)
 {
    memset(xsock, 0, sizeof(XMPPSOCKET_ITEM(socket_t)));
    xsock->sock = TS_SOCKET_ERROR;
    _init_settings(&xsock->settings);
 }
 
-XMPPSOCKET_FUNCTION(XMPPSOCKET_ITEM(socket_t) *, create)(xmpp_mem_t * allocator, int log_level)
+XMPPSOCKET_FUNCTION(XMPPSOCKET_ITEM(socket_t) *, create)(occam_allocator_t * allocator, occam_logger_t * log)
 {
-   xmpp_log_t * log = NULL;
-   if(log_level != -1)
-      log = xmpp_get_default_logger(log_level);
+   if(!allocator)
+      allocator = &occam_standard_allocator;
    xmpp_ctx_t * ctx = xmpp_ctx_new(allocator, log);
 
    if(!ctx)
       goto abort;
 
-   XMPPSOCKET_ITEM(socket_t) * xsock = xmpp_alloc(ctx, sizeof(XMPPSOCKET_ITEM(socket_t)));
+   XMPPSOCKET_ITEM(socket_t) * xsock = occam_alloc(allocator, sizeof(XMPPSOCKET_ITEM(socket_t)));
    _init_socket(xsock);
-   xsock->settings.xmpp_log_level = log_level;
+   xsock->settings.log = log;
+   xsock->settings.mem = allocator;
    if(!xsock)
       goto error1;
 
@@ -107,7 +108,7 @@ XMPPSOCKET_FUNCTION(XMPPSOCKET_ITEM(socket_t) *, create)(xmpp_mem_t * allocator,
 
 //error handling
 error2:
-   xmpp_free(ctx, xsock);
+   occam_free(allocator, xsock);
 error1:
    xmpp_ctx_free(ctx);
 abort:
@@ -236,13 +237,13 @@ static void _clear_queues(XMPPSOCKET_ITEM(socket_t) * xsock)
 
 static int _init_queues(XMPPSOCKET_ITEM(socket_t) * xsock)
 {
-   xsock->srd_buf = xmpp_alloc(xsock->xmppctx, xsock->settings.rd_queue_size);
+   xsock->srd_buf = occam_alloc(xsock->settings.mem, xsock->settings.rd_queue_size);
    if(!xsock->srd_buf)
    {
       _fill_error(xsock, XS_EALLOCATION, "failed to allocate read buffer");
       goto abort;
    }
-   xsock->swr_buf = xmpp_alloc(xsock->xmppctx, xsock->settings.wr_queue_size);
+   xsock->swr_buf = occam_alloc(xsock->settings.mem, xsock->settings.wr_queue_size);
    if(!xsock->swr_buf)
    {
       _fill_error(xsock, XS_EALLOCATION, "failed to allocate write buffer");
@@ -266,9 +267,9 @@ static void _deinit_queues(XMPPSOCKET_ITEM(socket_t) * xsock)
    _clear_queues(xsock);
 
    if(xsock->srd_buf)
-      xmpp_free(xsock->xmppctx, xsock->srd_buf);
+      occam_free(xsock->settings.mem, xsock->srd_buf);
    if(xsock->swr_buf)
-      xmpp_free(xsock->xmppctx, xsock->swr_buf);
+      occam_free(xsock->settings.mem, xsock->swr_buf);
 }
 
 static int _update_queues(XMPPSOCKET_ITEM(socket_t) * xsock)

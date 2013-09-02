@@ -14,18 +14,11 @@
 
 #include <libtinysocket/tinysocket.h>
 #include <libstrophe/strophe.h>
+#include <occam.h>
 
 enum XMPPSOCKET_ITEM(result_t){
    XS_ERROR,
    XS_OK,
-};
-
-enum XMPPSOCKET_ITEM(xmpp_log_level_t){
-   XS_XL_NONE = -1,
-   XS_XL_DEBUG,
-   XS_XL_INFO,
-   XS_XL_WARN,
-   XS_XL_ERROR
 };
 
 enum XMPPSOCKET_ITEM(errno_t){
@@ -61,9 +54,11 @@ typedef struct XMPPSOCKET_ITEM(settings_tag)
    XMPPSOCKET_ITEM(filter_t) wr_filter;
 
    unsigned long run_timeout;
-   int xmpp_log_level;
 
    tinsock_sockaddr_storage_t addr;
+
+   const occam_logger_t * log;
+   const occam_allocator_t * mem;
 } XMPPSOCKET_ITEM(settings_t);
 
 typedef struct XMPPSOCKET_ITEM(errors_tag)
@@ -78,7 +73,7 @@ typedef struct XMPPSOCKET_ITEM(socket_tag) XMPPSOCKET_ITEM(socket_t);
 
 XMPPSOCKET_FUNCTION(int, init)();
 XMPPSOCKET_FUNCTION(int, deinit)();
-XMPPSOCKET_FUNCTION(XMPPSOCKET_ITEM(socket_t) *, create)(xmpp_mem_t * allocator, int log_level);
+XMPPSOCKET_FUNCTION(XMPPSOCKET_ITEM(socket_t) *, create)(occam_allocator_t * allocator, occam_logger_t * log);
 XMPPSOCKET_FUNCTION(void, dispose)(XMPPSOCKET_ITEM(socket_t) * xsock);
 XMPPSOCKET_FUNCTION(int, connect_xmpp)(XMPPSOCKET_ITEM(socket_t) * xsock);
 XMPPSOCKET_FUNCTION(int, connect_sock)(XMPPSOCKET_ITEM(socket_t) * xsock);
