@@ -9,7 +9,7 @@ add_subdirectory(libstrophe)
 link_directories(${CMAKE_BINARY_DIR}/libstrophe)
 
 include_directories(${CMAKE_SOURCE_DIR})
-include_directories(${CMAKE_SOURCE_DIR}/liboccam)
+include_directories(${CMAKE_SOURCE_DIR}/libstrophe/liboccam)
 
 set(SOURCES
   src/socket.c

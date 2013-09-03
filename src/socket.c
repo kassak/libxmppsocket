@@ -27,22 +27,27 @@ int main(int argc, char ** argv)
       fprintf(stderr, "unknown port %s\n", argv[4]);
       abort();
    }
-   tinsock_sockaddr_storage_t stor;
+   tinsock_sockaddr_storage_t stor = {0};
    if(1 == tinsock_inet_pton(TS_AF_INET6, argv[3], &((tinsock_sockaddr_in6_t*)&stor)->sin6_addr))
    {
+      printf("ipv6\n");
       stor.ss_family = TS_AF_INET6;
-      ((tinsock_sockaddr_in6_t*)&stor)->sin6_port = port;
+      ((tinsock_sockaddr_in6_t*)&stor)->sin6_port = tinsock_htons(port);
    }
    else if(1 == tinsock_inet_pton(TS_AF_INET, argv[3], &((tinsock_sockaddr_in_t*)&stor)->sin_addr))
    {
+      printf("ipv4\n");
       stor.ss_family = TS_AF_INET;
-      ((tinsock_sockaddr_in_t*)&stor)->sin_port = port;
+      ((tinsock_sockaddr_in_t*)&stor)->sin_port = tinsock_htons(port);
    }
    else
    {
       fprintf(stderr, "unknown address %s\n", argv[3]);
       abort();
    }
+
+   char addr[255];
+   printf("ADDR %s", tinsock_inet_ntop(stor.ss_family, &((tinsock_sockaddr_in_t*)&stor)->sin_addr, addr, 255));
 
    s->addr = stor;
    res = xmppsock_connect_sock(xsock);
@@ -53,6 +58,10 @@ int main(int argc, char ** argv)
       fprintf(stderr, "con sock: %s\n", buf);
       assert(res == XS_OK);
    }
+
+   while(XS_OK == xmppsock_run_once(xsock))
+      ;//printf(".\n");
+
 
    printf("done\n");
 

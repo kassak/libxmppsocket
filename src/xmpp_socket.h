@@ -73,7 +73,7 @@ typedef struct XMPPSOCKET_ITEM(socket_tag) XMPPSOCKET_ITEM(socket_t);
 
 XMPPSOCKET_FUNCTION(int, init)();
 XMPPSOCKET_FUNCTION(int, deinit)();
-XMPPSOCKET_FUNCTION(XMPPSOCKET_ITEM(socket_t) *, create)(occam_allocator_t * allocator, occam_logger_t * log);
+XMPPSOCKET_FUNCTION(XMPPSOCKET_ITEM(socket_t) *, create)(const occam_allocator_t * allocator, occam_logger_t * log);
 XMPPSOCKET_FUNCTION(void, dispose)(XMPPSOCKET_ITEM(socket_t) * xsock);
 XMPPSOCKET_FUNCTION(int, connect_xmpp)(XMPPSOCKET_ITEM(socket_t) * xsock);
 XMPPSOCKET_FUNCTION(int, connect_sock)(XMPPSOCKET_ITEM(socket_t) * xsock);

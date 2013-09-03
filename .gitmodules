@@ -4,6 +4,3 @@
 [submodule "libtinysocket"]
 	path = libtinysocket
 	url = git@github.com:kassak/libtinysocket.git
-[submodule "liboccam"]
-	path = liboccam
-	url = git@github.com:kassak/liboccam.git

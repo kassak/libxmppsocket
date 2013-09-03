@@ -10,6 +10,9 @@
 #define MB *1024 KB
 
 #define PRECONDITION(X, S) if(!(X)) {_fill_error(S, XS_ELOGIC, "precondition failed: " #X);assert(0);return XS_ERROR;}
+#define SOCKADDR(ADDR) ((tinsock_sockaddr_t*)(ADDR))
+#define SOCKADDR_IP(ADDR) ((ADDR)->ss_family == TS_AF_INET ? (void*)&((tinsock_sockaddr_in_t*)(ADDR))->sin_addr : (void*)&((tinsock_sockaddr_in6_t*)(ADDR))->sin6_addr)
+#define SOCKADDR_PORT(ADDR) tinsock_ntohs((ADDR)->ss_family == TS_AF_INET ? ((tinsock_sockaddr_in_t*)(ADDR))->sin_port : ((tinsock_sockaddr_in6_t*)(ADDR))->sin6_port)
 
 struct XMPPSOCKET_ITEM(socket_tag)
 {
@@ -83,7 +86,7 @@ static void _init_socket(XMPPSOCKET_ITEM(socket_t) * xsock)
    _init_settings(&xsock->settings);
 }
 
-XMPPSOCKET_FUNCTION(XMPPSOCKET_ITEM(socket_t) *, create)(occam_allocator_t * allocator, occam_logger_t * log)
+XMPPSOCKET_FUNCTION(XMPPSOCKET_ITEM(socket_t) *, create)(const occam_allocator_t * allocator, occam_logger_t * log)
 {
    if(!allocator)
       allocator = &occam_standard_allocator;
@@ -112,6 +115,7 @@ error2:
 error1:
    xmpp_ctx_free(ctx);
 abort:
+   occam_logs_d(log, "xmpp socket creation failed");
    return NULL;
 }
 
@@ -146,6 +150,8 @@ static int _msg_handler(xmpp_conn_t * const conn, xmpp_stanza_t * const stanza,
    int size = strlen(intext);
    if(size == 0)
       return 1;
+   occam_log_d(xsock->settings.log, "read %i bytes from xmpp", size);
+
    void * state = xsock->settings.wr_filter.init_state(intext, size);
    for(;;)
    {
@@ -224,6 +230,7 @@ XMPPSOCKET_FUNCTION(int, connect_xmpp)(XMPPSOCKET_ITEM(socket_t) * xsock)
 
    return XS_OK;
 abort:
+   occam_logs_d(xsock->settings.log, "xmpp socket connection failed");
    return XS_ERROR;
 }
 
@@ -302,15 +309,24 @@ XMPPSOCKET_FUNCTION(int, connect_sock)(XMPPSOCKET_ITEM(socket_t) * xsock)
    if(xsock->sock == TS_SOCKET_ERROR)
    {
       _fill_sock_error(xsock, XS_ETRANSMISSION, "failed to create socket");
+      occam_logs_d(xsock->settings.log, "socket creation failed");
       goto abort;
    }
 
-   if(TS_NO_ERROR != tinsock_connect(xsock->sock, (const tinsock_sockaddr_t*)&xsock->settings.addr,
+   char addr[255];
+   if(TS_NO_ERROR != tinsock_connect(xsock->sock, SOCKADDR(&xsock->settings.addr),
                                      _addr_size_by_family(xsock->settings.addr.ss_family)))
    {
       _fill_sock_error(xsock, XS_ETRANSMISSION, "failed to connect");
+      occam_log_d(xsock->settings.log, "failed to connect to %s:%i", 
+         tinsock_inet_ntop(xsock->settings.addr.ss_family, SOCKADDR_IP(&xsock->settings.addr), addr, 255),
+         SOCKADDR_PORT(&xsock->settings.addr));
       goto error1;
    }
+   tinsock_fcntl(xsock->sock, TS_F_SETFL, TS_O_NONBLOCK);
+   occam_log_d(xsock->settings.log, "connected to %s:%i", 
+      tinsock_inet_ntop(xsock->settings.addr.ss_family, SOCKADDR_IP(&xsock->settings.addr), addr, 255),
+      SOCKADDR_PORT(&xsock->settings.addr));
    return XS_OK;
 error1:
    tinsock_close(xsock->sock);
@@ -354,6 +370,7 @@ XMPPSOCKET_FUNCTION(int, run_once)(XMPPSOCKET_ITEM(socket_t) * xsock)
          else if(res != -1)
          {
             cbuffer_write(&xsock->srd_queue, res);
+            occam_log_d(xsock->settings.log, "read %i bytes from socket", res);
          }
       }
    }
@@ -377,6 +394,7 @@ XMPPSOCKET_FUNCTION(int, run_once)(XMPPSOCKET_ITEM(socket_t) * xsock)
          else if(res != -1)
          {
             cbuffer_read(&xsock->srd_queue, res);
+            occam_log_d(xsock->settings.log, "written %i bytes to socket", res);
          }
       }
    }
