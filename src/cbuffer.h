@@ -30,6 +30,7 @@ static inline const void* cbuffer_seq_avail_read(const cbuffer_t * cbuf, const v
 
 static inline void cbuffer_read(cbuffer_t * cbuf, int num)
 {
+   //printf("read %i(%i)\n", num, cbuf->size);
    assert(cbuf->size >= num);
    cbuf->offset += num;
    if(cbuf->offset >= cbuf->capacity)
@@ -39,8 +40,10 @@ static inline void cbuffer_read(cbuffer_t * cbuf, int num)
 
 static inline void cbuffer_write(cbuffer_t * cbuf, int num)
 {
+   //printf("write %i(%i)\n", num, cbuf->size);
    assert(cbuf->size + num <= cbuf->capacity);
    cbuf->size += num;
+   //printf("ns %i\n", cbuf->size);
 }
 
 #endif //CBUFFER_H

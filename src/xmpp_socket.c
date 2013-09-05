@@ -173,6 +173,7 @@ static int _msg_handler(xmpp_conn_t * const conn, xmpp_stanza_t * const stanza,
          goto release;
       }
 
+      occam_log_d(xsock->settings.log, "write %i bytes to output queue", written);
       //update buffers
       cbuffer_write(&xsock->swr_queue, written);
       intext += consumed;
@@ -349,6 +350,8 @@ XMPPSOCKET_FUNCTION(int, run_once)(XMPPSOCKET_ITEM(socket_t) * xsock)
    PRECONDITION(xsock->sock != TS_SOCKET_ERROR, xsock);
    PRECONDITION(xsock->xmppconn != NULL, xsock);
 
+   occam_logs_t(xsock->settings.log, "run_once");
+
    xmpp_run_once_foreign(xsock->xmppctx, xsock->settings.run_timeout, &xsock->sock, 1, &xsock->sock, 1);
    //read from socket
    {
@@ -365,6 +368,7 @@ XMPPSOCKET_FUNCTION(int, run_once)(XMPPSOCKET_ITEM(socket_t) * xsock)
          }
          else if(res == 0)
          {
+            occam_logs_t(xsock->settings.log, "sock closed?");
             //TODO: socket closed?
          }
          else if(res != -1)
@@ -378,9 +382,10 @@ XMPPSOCKET_FUNCTION(int, run_once)(XMPPSOCKET_ITEM(socket_t) * xsock)
    {
       int sz;
       const void * buf;
-      buf = cbuffer_seq_avail_read(&xsock->srd_queue, xsock->srd_buf, &sz);
+      buf = cbuffer_seq_avail_read(&xsock->swr_queue, xsock->swr_buf, &sz);
       if(sz)
       {
+         occam_log_d(xsock->settings.log, "have %i bytes to write", sz);
          int res = tinsock_write(xsock->sock, buf, sz);
          if(res == -1 && !tinsock_is_recoverable())
          {
@@ -389,11 +394,12 @@ XMPPSOCKET_FUNCTION(int, run_once)(XMPPSOCKET_ITEM(socket_t) * xsock)
          }
          else if(res == 0)
          {
+            occam_logs_t(xsock->settings.log, "sock closed?");
             //TODO: socket closed?
          }
          else if(res != -1)
          {
-            cbuffer_read(&xsock->srd_queue, res);
+            cbuffer_read(&xsock->swr_queue, res);
             occam_log_d(xsock->settings.log, "written %i bytes to socket", res);
          }
       }
