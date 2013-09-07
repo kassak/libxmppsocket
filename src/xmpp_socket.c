@@ -5,6 +5,7 @@
 #include <libtinysocket/tinysocket.h>
 #include <string.h>
 #include <assert.h>
+#include <time.h>
 
 #define KB *1024
 #define MB *1024 KB
@@ -22,11 +23,22 @@ struct XMPPSOCKET_ITEM(socket_tag)
    XMPPSOCKET_ITEM(settings_t) settings;
    XMPPSOCKET_ITEM(errors_t) last_error;
 
+   clock_t last_tm;
+
    cbuffer_t swr_queue;
    cbuffer_t srd_queue;
    char* swr_buf;
    char* srd_buf;
+
+   const occam_logger_t * log;
+   const occam_allocator_t * mem;
 };
+
+static clock_t _msecs_passed(XMPPSOCKET_ITEM(socket_t) * xsock, clock_t tm)
+{
+   clock_t dclock = xsock->last_tm - tm;
+   return dclock * 1000 / CLOCKS_PER_SEC;
+}
 
 static void _clear_sock_error(XMPPSOCKET_ITEM(socket_t) * xsock)
 {
@@ -62,9 +74,9 @@ XMPPSOCKET_FUNCTION(XMPPSOCKET_ITEM(errors_t) *, last_error)(XMPPSOCKET_ITEM(soc
 XMPPSOCKET_FUNCTION(int, init)()
 {
    xmpp_initialize();
-   tinsock_init();
+   return tinsock_init();
 }
-XMPPSOCKET_FUNCTION(int, deinit)()
+XMPPSOCKET_FUNCTION(void, deinit)()
 {
    tinsock_deinit();
    xmpp_shutdown();
@@ -74,7 +86,7 @@ static void _init_settings(XMPPSOCKET_ITEM(settings_t) * settings)
 {
    memset(settings, 0, sizeof(XMPPSOCKET_ITEM(settings_t)));
    settings->rd_queue_size = settings->wr_queue_size = 1 MB;
-   settings->run_timeout = 10;
+   settings->latency = 500;
    settings->rd_filter = *XMPPSOCKET_ITEM(default_filter)();
    settings->wr_filter = *XMPPSOCKET_ITEM(default_filter)();
 }
@@ -83,6 +95,7 @@ static void _init_socket(XMPPSOCKET_ITEM(socket_t) * xsock)
 {
    memset(xsock, 0, sizeof(XMPPSOCKET_ITEM(socket_t)));
    xsock->sock = TS_SOCKET_ERROR;
+   xsock->last_tm = clock();
    _init_settings(&xsock->settings);
 }
 
@@ -97,8 +110,8 @@ XMPPSOCKET_FUNCTION(XMPPSOCKET_ITEM(socket_t) *, create)(const occam_allocator_t
 
    XMPPSOCKET_ITEM(socket_t) * xsock = occam_alloc(allocator, sizeof(XMPPSOCKET_ITEM(socket_t)));
    _init_socket(xsock);
-   xsock->settings.log = log;
-   xsock->settings.mem = allocator;
+   xsock->log = log;
+   xsock->mem = allocator;
    if(!xsock)
       goto error1;
 
@@ -138,19 +151,26 @@ static int _msg_handler(xmpp_conn_t * const conn, xmpp_stanza_t * const stanza,
                         void * const userdata)
 {
    XMPPSOCKET_ITEM(socket_t) * xsock = (XMPPSOCKET_ITEM(socket_t) *)userdata;
-   char *intext;
+   assert(xsock->settings.pair_jid);
 
    if(!xmpp_stanza_get_child_by_name(stanza, "body"))
       return 1;
    if(!strcmp(xmpp_stanza_get_attribute(stanza, "type"), "error"))
       return 1;
+   if(!strcmp(xmpp_stanza_get_attribute(stanza, "from"), xsock->settings.pair_jid)) //ignore others
+   {
+      occam_log_d(xsock->log, "recieved message from %s but assumed %s. who're you, you son of the bitch?",
+          xmpp_stanza_get_attribute(stanza, "from"), xsock->settings.pair_jid);
+      return 0;
+   }
 
+   char *intext;
    intext = xmpp_stanza_get_text(xmpp_stanza_get_child_by_name(stanza, "body"));
 
    int size = strlen(intext);
    if(size == 0)
       return 1;
-   occam_log_d(xsock->settings.log, "read %i bytes from xmpp", size);
+   occam_log_d(xsock->log, "read %i bytes from xmpp", size);
 
    void * state = xsock->settings.wr_filter.init_state(intext, size);
    for(;;)
@@ -173,7 +193,7 @@ static int _msg_handler(xmpp_conn_t * const conn, xmpp_stanza_t * const stanza,
          goto release;
       }
 
-      occam_log_d(xsock->settings.log, "write %i bytes to output queue", written);
+      occam_log_d(xsock->log, "write %i bytes to output queue", written);
       //update buffers
       cbuffer_write(&xsock->swr_queue, written);
       intext += consumed;
@@ -231,7 +251,7 @@ XMPPSOCKET_FUNCTION(int, connect_xmpp)(XMPPSOCKET_ITEM(socket_t) * xsock)
 
    return XS_OK;
 abort:
-   occam_logs_d(xsock->settings.log, "xmpp socket connection failed");
+   occam_logs_d(xsock->log, "xmpp socket connection failed");
    return XS_ERROR;
 }
 
@@ -245,13 +265,13 @@ static void _clear_queues(XMPPSOCKET_ITEM(socket_t) * xsock)
 
 static int _init_queues(XMPPSOCKET_ITEM(socket_t) * xsock)
 {
-   xsock->srd_buf = occam_alloc(xsock->settings.mem, xsock->settings.rd_queue_size);
+   xsock->srd_buf = occam_alloc(xsock->mem, xsock->settings.rd_queue_size);
    if(!xsock->srd_buf)
    {
       _fill_error(xsock, XS_EALLOCATION, "failed to allocate read buffer");
       goto abort;
    }
-   xsock->swr_buf = occam_alloc(xsock->settings.mem, xsock->settings.wr_queue_size);
+   xsock->swr_buf = occam_alloc(xsock->mem, xsock->settings.wr_queue_size);
    if(!xsock->swr_buf)
    {
       _fill_error(xsock, XS_EALLOCATION, "failed to allocate write buffer");
@@ -275,16 +295,16 @@ static void _deinit_queues(XMPPSOCKET_ITEM(socket_t) * xsock)
    _clear_queues(xsock);
 
    if(xsock->srd_buf)
-      occam_free(xsock->settings.mem, xsock->srd_buf);
+      occam_free(xsock->mem, xsock->srd_buf);
    if(xsock->swr_buf)
-      occam_free(xsock->settings.mem, xsock->swr_buf);
+      occam_free(xsock->mem, xsock->swr_buf);
 }
 
 static int _update_queues(XMPPSOCKET_ITEM(socket_t) * xsock)
 {
    if(xsock->srd_queue.capacity == xsock->settings.rd_queue_size
       && xsock->swr_queue.capacity == xsock->settings.wr_queue_size)
-      return;
+      return XS_OK;
    _deinit_queues(xsock);
    return _init_queues(xsock);
 }
@@ -310,7 +330,7 @@ XMPPSOCKET_FUNCTION(int, connect_sock)(XMPPSOCKET_ITEM(socket_t) * xsock)
    if(xsock->sock == TS_SOCKET_ERROR)
    {
       _fill_sock_error(xsock, XS_ETRANSMISSION, "failed to create socket");
-      occam_logs_d(xsock->settings.log, "socket creation failed");
+      occam_logs_d(xsock->log, "socket creation failed");
       goto abort;
    }
 
@@ -319,13 +339,13 @@ XMPPSOCKET_FUNCTION(int, connect_sock)(XMPPSOCKET_ITEM(socket_t) * xsock)
                                      _addr_size_by_family(xsock->settings.addr.ss_family)))
    {
       _fill_sock_error(xsock, XS_ETRANSMISSION, "failed to connect");
-      occam_log_d(xsock->settings.log, "failed to connect to %s:%i", 
+      occam_log_d(xsock->log, "failed to connect to %s:%i", 
          tinsock_inet_ntop(xsock->settings.addr.ss_family, SOCKADDR_IP(&xsock->settings.addr), addr, 255),
          SOCKADDR_PORT(&xsock->settings.addr));
       goto error1;
    }
    tinsock_fcntl(xsock->sock, TS_F_SETFL, TS_O_NONBLOCK);
-   occam_log_d(xsock->settings.log, "connected to %s:%i", 
+   occam_log_d(xsock->log, "connected to %s:%i", 
       tinsock_inet_ntop(xsock->settings.addr.ss_family, SOCKADDR_IP(&xsock->settings.addr), addr, 255),
       SOCKADDR_PORT(&xsock->settings.addr));
    return XS_OK;
@@ -345,14 +365,81 @@ XMPPSOCKET_FUNCTION(int, pair_socket)(XMPPSOCKET_ITEM(socket_t) * xsock, tinsock
    return XS_OK;
 }
 
+static int _write_xmpp_data(XMPPSOCKET_ITEM(socket_t) * xsock)
+{
+   //TODO: make an error
+   assert(xsock->settings.pair_jid);
+
+   if(xsock->srd_queue.size == 0)
+      return XS_OK;
+   int res = XS_OK;
+
+   xmpp_stanza_t *reply = xmpp_stanza_new(xsock->xmppctx);
+   xmpp_stanza_t *body = xmpp_stanza_new(xsock->xmppctx);
+   xmpp_stanza_t *text = xmpp_stanza_new(xsock->xmppctx);
+   if(!reply || !body || !text)
+   {
+      res = XS_ERROR;
+      goto cleanup;
+   }
+
+   xmpp_stanza_set_name(reply, "message");
+   xmpp_stanza_set_type(reply, "chat");
+   xmpp_stanza_set_attribute(reply, "to", xsock->settings.pair_jid);
+
+   xmpp_stanza_set_name(body, "body");
+
+   int sz;
+   const void * buf = cbuffer_seq_avail_read(&xsock->srd_queue, xsock->srd_buf, &sz);
+   xmpp_stanza_set_text_with_size(text, buf, sz);
+   cbuffer_read(&xsock->srd_queue, sz);
+   xmpp_stanza_add_child(body, text);
+   xmpp_stanza_add_child(reply, body);
+
+   xmpp_send(xsock->xmppconn, reply);
+
+cleanup:
+   if(text)
+      xmpp_stanza_release(text);
+   if(body)
+      xmpp_stanza_release(body);
+   if(reply)
+      xmpp_stanza_release(reply);
+   return res;
+}
+
 XMPPSOCKET_FUNCTION(int, run_once)(XMPPSOCKET_ITEM(socket_t) * xsock)
 {
    PRECONDITION(xsock->sock != TS_SOCKET_ERROR, xsock);
    PRECONDITION(xsock->xmppconn != NULL, xsock);
 
-   occam_logs_t(xsock->settings.log, "run_once");
+   occam_logs_t(xsock->log, "run_once");
 
-   xmpp_run_once_foreign(xsock->xmppctx, xsock->settings.run_timeout, &xsock->sock, 1, &xsock->sock, 1);
+   clock_t cur_tm = clock();
+   clock_t dt = _msecs_passed(xsock, cur_tm);
+   if(dt > xsock->settings.latency || xsock->srd_queue.size > xsock->srd_queue.capacity/2)
+   {
+      if(_write_xmpp_data(xsock) != XS_OK)
+         return XS_ERROR;
+      xsock->last_tm = cur_tm;
+   }
+
+   if(xsock->srd_queue.size == 0)
+   {
+      dt = 10000;
+      xsock->last_tm = cur_tm;
+   }
+   else
+   {
+      dt = xsock->settings.latency - dt;
+      if(dt < 0)
+         dt = 0;
+   }
+
+   int need_write = (xsock->swr_queue.size != 0);
+   xmpp_run_once_foreign(xsock->xmppctx, dt, &xsock->sock, 1, need_write ? &xsock->sock : NULL, need_write ? 1 : 0);
+   occam_logs_t(xsock->log, "exited");
+
    //read from socket
    {
       int sz;
@@ -368,13 +455,13 @@ XMPPSOCKET_FUNCTION(int, run_once)(XMPPSOCKET_ITEM(socket_t) * xsock)
          }
          else if(res == 0)
          {
-            occam_logs_t(xsock->settings.log, "sock closed?");
+            occam_logs_t(xsock->log, "sock closed?");
             //TODO: socket closed?
          }
          else if(res != -1)
          {
             cbuffer_write(&xsock->srd_queue, res);
-            occam_log_d(xsock->settings.log, "read %i bytes from socket", res);
+            occam_log_d(xsock->log, "read %i bytes from socket", res);
          }
       }
    }
@@ -385,7 +472,7 @@ XMPPSOCKET_FUNCTION(int, run_once)(XMPPSOCKET_ITEM(socket_t) * xsock)
       buf = cbuffer_seq_avail_read(&xsock->swr_queue, xsock->swr_buf, &sz);
       if(sz)
       {
-         occam_log_d(xsock->settings.log, "have %i bytes to write", sz);
+         occam_log_d(xsock->log, "have %i bytes to write", sz);
          int res = tinsock_write(xsock->sock, buf, sz);
          if(res == -1 && !tinsock_is_recoverable())
          {
@@ -394,13 +481,13 @@ XMPPSOCKET_FUNCTION(int, run_once)(XMPPSOCKET_ITEM(socket_t) * xsock)
          }
          else if(res == 0)
          {
-            occam_logs_t(xsock->settings.log, "sock closed?");
+            occam_logs_t(xsock->log, "sock closed?");
             //TODO: socket closed?
          }
          else if(res != -1)
          {
             cbuffer_read(&xsock->swr_queue, res);
-            occam_log_d(xsock->settings.log, "written %i bytes to socket", res);
+            occam_log_d(xsock->log, "written %i bytes to socket", res);
          }
       }
    }
@@ -409,6 +496,7 @@ XMPPSOCKET_FUNCTION(int, run_once)(XMPPSOCKET_ITEM(socket_t) * xsock)
 
 static void* _init_dummy_state(const void * data, int sz)
 {
+   return NULL;
 }
 
 static void _deinit_dummy_state(void * state)

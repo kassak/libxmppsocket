@@ -53,12 +53,9 @@ typedef struct XMPPSOCKET_ITEM(settings_tag)
    XMPPSOCKET_ITEM(filter_t) rd_filter;
    XMPPSOCKET_ITEM(filter_t) wr_filter;
 
-   unsigned long run_timeout;
+   unsigned long latency;
 
    tinsock_sockaddr_storage_t addr;
-
-   const occam_logger_t * log;
-   const occam_allocator_t * mem;
 } XMPPSOCKET_ITEM(settings_t);
 
 typedef struct XMPPSOCKET_ITEM(errors_tag)
@@ -72,7 +69,7 @@ struct XMPPSOCKET_ITEM(socket_tag);
 typedef struct XMPPSOCKET_ITEM(socket_tag) XMPPSOCKET_ITEM(socket_t);
 
 XMPPSOCKET_FUNCTION(int, init)();
-XMPPSOCKET_FUNCTION(int, deinit)();
+XMPPSOCKET_FUNCTION(void, deinit)();
 XMPPSOCKET_FUNCTION(XMPPSOCKET_ITEM(socket_t) *, create)(const occam_allocator_t * allocator, occam_logger_t * log);
 XMPPSOCKET_FUNCTION(void, dispose)(XMPPSOCKET_ITEM(socket_t) * xsock);
 XMPPSOCKET_FUNCTION(int, connect_xmpp)(XMPPSOCKET_ITEM(socket_t) * xsock);
