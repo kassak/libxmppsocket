@@ -50,13 +50,12 @@ static void _fill_error(XMPPSOCKET_ITEM(socket_t) * xsock, int xs_error, const c
    _clear_sock_error(xsock);
    xsock->last_error.xs_errno = xs_error;
    xsock->last_error.xs_desc = desc;
+   occam_log_t(xsock->log, "filling error: %s", desc);
 }
 
 static void _fill_filter_error(XMPPSOCKET_ITEM(socket_t) * xsock, int xs_error, const char * desc, XMPPSOCKET_ITEM(filter_t) * flt, void * state)
 {
-   _clear_sock_error(xsock);
-   xsock->last_error.xs_errno = xs_error;
-   xsock->last_error.xs_desc = desc;
+   _fill_error(xsock, xs_error, desc);
    //TODO: filter error
 }
 
@@ -172,7 +171,14 @@ static int _msg_handler(xmpp_conn_t * const conn, xmpp_stanza_t * const stanza,
       return 1;
    occam_log_d(xsock->log, "read %i bytes from xmpp", size);
 
-   void * state = xsock->settings.wr_filter.init_state(intext, size);
+   size_t out_sz;
+   void * state = xsock->settings.wr_filter.init_state(intext, size, &out_sz);
+   //occam_log_d(xsock->log, "out_sz: %i", out_sz);
+   if(out_sz > xsock->swr_queue.capacity - xsock->swr_queue.size) // pitty, not enough space in queue
+   {
+      _fill_error(xsock, XS_EFILTER, "not enough space in queue");
+      goto release;
+   }
    for(;;)
    {
       int sz, consumed, written;
@@ -377,6 +383,7 @@ static int _write_xmpp_data(XMPPSOCKET_ITEM(socket_t) * xsock)
    xmpp_stanza_t *reply = xmpp_stanza_new(xsock->xmppctx);
    xmpp_stanza_t *body = xmpp_stanza_new(xsock->xmppctx);
    xmpp_stanza_t *text = xmpp_stanza_new(xsock->xmppctx);
+   void * out_buf = NULL;
    if(!reply || !body || !text)
    {
       res = XS_ERROR;
@@ -391,7 +398,20 @@ static int _write_xmpp_data(XMPPSOCKET_ITEM(socket_t) * xsock)
 
    int sz;
    const void * buf = cbuffer_seq_avail_read(&xsock->srd_queue, xsock->srd_buf, &sz);
-   xmpp_stanza_set_text_with_size(text, buf, sz);
+
+   size_t out_sz;
+   void * state = xsock->settings.rd_filter.init_state(buf, sz, &out_sz);
+   out_buf = occam_alloc(xsock->mem, out_sz);
+   int cons, wr;
+   if(!out_buf || xsock->settings.rd_filter.filter(buf, sz, out_buf, out_sz, &cons, &wr, state) || cons != sz)
+   {
+      xsock->settings.rd_filter.deinit_state(state);
+      res = XS_ERROR;
+      goto cleanup;
+   }
+   xsock->settings.rd_filter.deinit_state(state);
+
+   xmpp_stanza_set_text_with_size(text, out_buf, wr);
    cbuffer_read(&xsock->srd_queue, sz);
    xmpp_stanza_add_child(body, text);
    xmpp_stanza_add_child(reply, body);
@@ -405,6 +425,8 @@ cleanup:
       xmpp_stanza_release(body);
    if(reply)
       xmpp_stanza_release(reply);
+   if(out_buf)
+      occam_free(xsock->mem, out_buf);
    return res;
 }
 
@@ -494,8 +516,10 @@ XMPPSOCKET_FUNCTION(int, run_once)(XMPPSOCKET_ITEM(socket_t) * xsock)
    return XS_OK;
 }
 
-static void* _init_dummy_state(const void * data, int sz)
+static void* _init_dummy_state(const void * data, int sz, size_t * out_sz)
 {
+   if(out_sz)
+      *out_sz = sz;
    return NULL;
 }
 

@@ -31,7 +31,7 @@ enum XMPPSOCKET_ITEM(errno_t){
 
 typedef struct XMPPSOCKET_ITEM(filter_tag)
 {
-   void* (*init_state) (const void * in_data, int in_data_sz);
+   void* (*init_state) (const void * in_data, int in_data_sz, size_t * out_sz);
    void (*deinit_state) (void * state);
    int (*filter)(const void * in_data, int in_data_sz,
           void * out_data, int out_data_sz,
